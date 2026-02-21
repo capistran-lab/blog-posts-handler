@@ -24,11 +24,24 @@ def get_post(post_id: str) -> Union[Dict[str, Any], None]:
         return None
     return item
 
-def create_post(data: Dict[str, Any]) -> str:
-    """Initialize metadata and save new post."""
-    data['created_at'] = datetime.datetime.utcnow().isoformat()
-    data['is_deleted'] = False
-    table.put_item(Item=data)
+def create_post(data: dict):
+    # Mapping Frontend/Zod Schema to Single Table Design
+    item = {
+        'PK': f"POST#{data['id']}",       # Unique identifier for the partition
+        'SK': "METADATA",                 # Or whatever sort key pattern you use
+        'id': data['id'],                 # Keep the original ID for the frontend
+        'title': data['title'],
+        'slug': data['slug'],
+        'content': data['content'],
+        'author': data['author'],
+        'date': data['date'],
+        'tags': data['tags'],
+        'imageUrl': data.get('imageUrl', '/board.png'),
+        'GSI1PK': "POSTS",                # Useful for list_posts() query
+        'GSI1SK': data['date']
+    }
+    
+    table.put_item(Item=item)
     return data['id']
 
 def update_post(post_id: str, update_data: Dict[str, Any]) -> None:
