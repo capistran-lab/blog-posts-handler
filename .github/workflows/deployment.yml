@@ -24,10 +24,10 @@ jobs:
             - name: Security Audit (pip-audit)
               run: |
                   python3 -m pip install pip-audit
-                  python3 -m pip_audit -r requirements.txt
+                  # Use --local to prevent venv creation issues on Orange Pi
+                  python3 -m pip_audit -r requirements.txt --local
 
             # --- ONLY DEPLOY ON MERGE TO MAIN ---
-            # Using 'github.event_name == 'push'' to target the merge to main
             - name: Install dependencies
               if: github.event_name == 'push'
               run: |
@@ -93,21 +93,27 @@ jobs:
                   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
 
-            - name: Update Aliases
+            - name: Update or Create Alias
               if: github.event_name == 'push'
               run: |
-                  aws lambda update-alias \
-                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
-                    --name live \
-                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
-                    --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
-                    --region ${{ vars.AWS_REGION }} || \
-                  aws lambda create-alias \
-                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
-                    --name live \
-                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
-                    --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
-                    --region ${{ vars.AWS_REGION }}
+                  # Check if the 'live' alias already exists
+                  if aws lambda get-alias --function-name ${{ vars.PROJECT_NAME }}-posts-handler --name live --region ${{ vars.AWS_REGION }} > /dev/null 2>&1; then
+                    echo "Alias exists. Updating to version ${{ steps.deploy_lambda.outputs.new_version }}..."
+                    aws lambda update-alias \
+                      --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
+                      --name live \
+                      --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
+                      --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
+                      --region ${{ vars.AWS_REGION }}
+                  else
+                    echo "Alias does not exist. Creating 'live' alias for version ${{ steps.deploy_lambda.outputs.new_version }}..."
+                    aws lambda create-alias \
+                      --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
+                      --name live \
+                      --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
+                      --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
+                      --region ${{ vars.AWS_REGION }}
+                  fi
               env:
                   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
                   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
