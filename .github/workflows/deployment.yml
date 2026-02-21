@@ -58,19 +58,19 @@ jobs:
             - name: Deploy and Publish Lambda Version
               id: deploy_lambda
               run: |
-                  # Using 'posts-hander' to match the actual AWS resource name
+                  # Using 'posts-handler' to match the actual AWS resource name
                   echo "Waiting for function to be in Active state..."
-                  aws lambda wait function-active-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-hander --region ${{ vars.AWS_REGION }}
+                  aws lambda wait function-active-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-handler --region ${{ vars.AWS_REGION }}
 
                   # 1. Update Lambda code using the S3 artifact version
                   aws lambda update-function-code \
-                    --function-name ${{ vars.PROJECT_NAME }}-posts-hander \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --s3-bucket ${{ vars.PROJECT_NAME }}-artifacts \
                     --s3-key posts-handler.zip \
                     --s3-object-version ${{ steps.upload_s3.outputs.s3_version_id }} \
                     --region ${{ vars.AWS_REGION }}
 
-                  aws lambda wait function-updated-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-hander --region ${{ vars.AWS_REGION }}
+                  aws lambda wait function-updated-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-handler --region ${{ vars.AWS_REGION }}
 
                   # 2. Extract PR Info for versioning description
                   PR_NUMBER=$(git log -1 --pretty=%s | grep -oP '#\d+' | head -n 1 | sed 's/#//' || echo "manual")
@@ -82,7 +82,7 @@ jobs:
 
                   # 3. Publish a new Lambda version with the PR title as description
                   NEW_VER=$(aws lambda publish-version \
-                    --function-name ${{ vars.PROJECT_NAME }}-posts-hander \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --description "$PR_TITLE" \
                     --query 'Version' --output text \
                     --region ${{ vars.AWS_REGION }})
@@ -99,13 +99,13 @@ jobs:
               run: |
                   # Update or create the 'live' alias pointing to the new version
                   aws lambda update-alias \
-                    --function-name ${{ vars.PROJECT_NAME }}-posts-hander \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --name live \
                     --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
                     --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
                     --region ${{ vars.AWS_REGION }} || \
                   aws lambda create-alias \
-                    --function-name ${{ vars.PROJECT_NAME }}-posts-hander \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --name live \
                     --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
                     --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
