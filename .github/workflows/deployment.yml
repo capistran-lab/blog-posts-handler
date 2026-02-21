@@ -40,7 +40,7 @@ jobs:
               run: |
                   VERSION_ID=$(aws s3api put-object \
                     --bucket ${{ vars.PROJECT_NAME }}-artifacts \
-                    --key post-handler.zip \
+                    --key posts-handler.zip \
                     --body function.zip \
                     --query 'VersionId' \
                     --output text)
@@ -54,17 +54,17 @@ jobs:
               id: deploy_lambda
               run: |
                   echo "Waiting for function to be in Active state..."
-                  aws lambda wait function-active-v2 --function-name ${{ vars.PROJECT_NAME }}-post-handler --region ${{ vars.AWS_REGION }}
+                  aws lambda wait function-active-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-handler --region ${{ vars.AWS_REGION }}
 
                   # 1. Update the code from S3
                   aws lambda update-function-code \
-                    --function-name ${{ vars.PROJECT_NAME }}-post-handler \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --s3-bucket ${{ vars.PROJECT_NAME }}-artifacts \
-                    --s3-key post-handler.zip \
+                    --s3-key posts-handler.zip \
                     --s3-object-version ${{ steps.upload_s3.outputs.s3_version_id }} \
                     --region ${{ vars.AWS_REGION }}
 
-                  aws lambda wait function-updated-v2 --function-name ${{ vars.PROJECT_NAME }}-post-handler --region ${{ vars.AWS_REGION }}
+                  aws lambda wait function-updated-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-handler --region ${{ vars.AWS_REGION }}
 
                   # 2. Extract PR Info (Same logic as your Auth lambda)
                   PR_NUMBER=$(git log -1 --pretty=%s | grep -oP '#\d+' | head -n 1 | sed 's/#//' || echo "manual")
@@ -76,7 +76,7 @@ jobs:
 
                   # 3. Publish version
                   NEW_VER=$(aws lambda publish-version \
-                    --function-name ${{ vars.PROJECT_NAME }}-post-handler \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --description "$PR_TITLE" \
                     --query 'Version' --output text \
                     --region ${{ vars.AWS_REGION }})
@@ -93,13 +93,13 @@ jobs:
               run: |
                   # Alias 'live'
                   aws lambda update-alias \
-                    --function-name ${{ vars.PROJECT_NAME }}-post-handler \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --name live \
                     --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
                     --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
                     --region ${{ vars.AWS_REGION }} || \
                   aws lambda create-alias \
-                    --function-name ${{ vars.PROJECT_NAME }}-post-handler \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --name live \
                     --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
                     --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
