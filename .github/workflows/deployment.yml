@@ -74,7 +74,8 @@ jobs:
 
                   aws lambda wait function-updated-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-handler --region ${{ vars.AWS_REGION }}
 
-                  # Metadata extraction
+                  # Metadata extraction for Version Description
+                  PR_NUMBER=$(git log -1 --pretty=%s | grep -oP '#\d+' | head -n 1 | sed 's/#//' || echo "manual")
                   PR_TITLE=$(git log -1 --pretty=%B | sed -n '3p' | sed 's/["'\'']//g' | xargs)
                   if [ -z "$PR_TITLE" ]; then
                     PR_TITLE=$(git log -1 --pretty=%s | sed -E 's/Merge pull request #[0-9]+ from [^ ]+//' | sed 's/["'\'']//g' | xargs)
@@ -87,33 +88,46 @@ jobs:
                     --region ${{ vars.AWS_REGION }})
 
                   echo "new_version=$NEW_VER" >> $GITHUB_OUTPUT
+                  echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
                   echo "pr_title=$PR_TITLE" >> $GITHUB_OUTPUT
               env:
                   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
                   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
                   AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
 
-            - name: Update or Create Alias
+            - name: Update or Create Aliases
               if: github.event_name == 'push'
               run: |
-                  # Check if the 'live' alias already exists
-                  if aws lambda get-alias --function-name ${{ vars.PROJECT_NAME }}-posts-handler --name live --region ${{ vars.AWS_REGION }} > /dev/null 2>&1; then
-                    echo "Alias exists. Updating to version ${{ steps.deploy_lambda.outputs.new_version }}..."
-                    aws lambda update-alias \
-                      --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
-                      --name live \
-                      --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
-                      --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
-                      --region ${{ vars.AWS_REGION }}
-                  else
-                    echo "Alias does not exist. Creating 'live' alias for version ${{ steps.deploy_lambda.outputs.new_version }}..."
-                    aws lambda create-alias \
-                      --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
-                      --name live \
-                      --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
-                      --description "${{ steps.deploy_lambda.outputs.pr_title }}" \
-                      --region ${{ vars.AWS_REGION }}
-                  fi
+                  # 1. Logic for PR-specific alias (replicates auth-lambda behavior)
+                  PR_ALIAS="pr-${{ steps.deploy_lambda.outputs.pr_number }}"
+                  echo "Updating/Creating PR alias: $PR_ALIAS"
+
+                  aws lambda update-alias \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
+                    --name "$PR_ALIAS" \
+                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
+                    --region ${{ vars.AWS_REGION }} || \
+                  aws lambda create-alias \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
+                    --name "$PR_ALIAS" \
+                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
+                    --region ${{ vars.AWS_REGION }}
+
+                  # 2. Logic for Production 'live' alias
+                  echo "Point 'live' alias to version ${{ steps.deploy_lambda.outputs.new_version }}"
+
+                  aws lambda update-alias \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
+                    --name live \
+                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
+                    --description "Pointed to $PR_ALIAS: ${{ steps.deploy_lambda.outputs.pr_title }}" \
+                    --region ${{ vars.AWS_REGION }} || \
+                  aws lambda create-alias \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
+                    --name live \
+                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
+                    --description "Initial live alias from $PR_ALIAS" \
+                    --region ${{ vars.AWS_REGION }}
               env:
                   AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
                   AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
