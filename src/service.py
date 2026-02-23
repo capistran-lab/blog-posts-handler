@@ -31,6 +31,8 @@ def get_post(post_id: str) -> Union[Dict[str, Any], None]:
     item = response.get('Item')
     if not item or item.get('is_deleted') is True:
         return None
+    
+    
     return item
 
 def get_post_by_slug(slug: str) -> Union[Dict[str, Any], None]:

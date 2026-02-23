@@ -24,8 +24,12 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if params and params.get('id'):
                 post = service.get_post(params['id'])
                 return build_response(200, post) if post else build_response(404, {"msg": "Post Not Found"})
-            
-            return build_response(200, service.list_posts())
+            posts = service.list_posts()
+            paginated_response = {
+                                "items": posts,
+                                "nextCursor": None  # Por ahora None hasta que implementes paginación real
+                                }
+            return build_response(200, paginated_response) 
 
         elif method == 'POST':
             # This will handle the ULID and schema validation via service.py
