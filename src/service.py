@@ -52,6 +52,7 @@ def create_post(data: dict):
         'id': data['id'],
         'title': data['title'],
         'slug': data['slug'],
+        'excerpt': data.get('excerpt', ''),
         'content': data['content'],
         'author': data['author'],
         'date': data['date'],
