@@ -1,35 +1,53 @@
 import os
 import boto3
 import datetime
+from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, List, Any, Union
 
-# Global resource initialization
+# Inicialización
 dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = os.environ.get('TABLE_NAME', 'blog-website-table')
 table = dynamodb.Table(TABLE_NAME)
 
 def list_posts() -> List[Dict[str, Any]]:
-    """Retrieve all posts that are not soft-deleted."""
-    response = table.scan(
-        FilterExpression="attribute_not_exists(is_deleted) OR is_deleted = :f",
-        ExpressionAttributeValues={":f": False}
+    """Retrieve only items of type POST using the TypeIndex."""
+    response = table.query(
+        IndexName='TypeIndex',  # <-- Coincide con tu dynamo.tf
+        KeyConditionExpression=Key('GSI1PK').eq('POSTS'),
+        # Filtro opcional para soft-delete
+        FilterExpression=Attr("is_deleted").ne(True),
+        ScanIndexForward=False # Recientes primero (usa GSI1SK/fecha)
     )
     return response.get('Items', [])
 
 def get_post(post_id: str) -> Union[Dict[str, Any], None]:
-    """Retrieve a single post if it exists and is not deleted."""
-    response = table.get_item(Key={'id': post_id})
+    """Retrieve using the Single Table PK/SK pattern."""
+    response = table.get_item(
+        Key={
+            'PK': f"POST#{post_id}",
+            'SK': "METADATA"
+        }
+    )
     item = response.get('Item')
     if not item or item.get('is_deleted') is True:
         return None
     return item
 
+def get_post_by_slug(slug: str) -> Union[Dict[str, Any], None]:
+    """Retrieve using the SlugIndex from your dynamo.tf."""
+    response = table.query(
+        IndexName='SlugIndex',
+        KeyConditionExpression=Key('slug').eq(slug)
+    )
+    items = response.get('Items', [])
+    return items[0] if items else None
+
 def create_post(data: dict):
-    # Mapping Frontend/Zod Schema to Single Table Design
+    # Aseguramos que el item tenga todas las llaves de tus índices
     item = {
-        'PK': f"POST#{data['id']}",       # Unique identifier for the partition
-        'SK': "METADATA",                 # Or whatever sort key pattern you use
-        'id': data['id'],                 # Keep the original ID for the frontend
+        'PK': f"POST#{data['id']}",
+        'SK': "METADATA",
+        'id': data['id'],
         'title': data['title'],
         'slug': data['slug'],
         'content': data['content'],
@@ -37,32 +55,41 @@ def create_post(data: dict):
         'date': data['date'],
         'tags': data['tags'],
         'imageUrl': data.get('imageUrl', '/board.png'),
-        'GSI1PK': "POSTS",                # Useful for list_posts() query
-        'GSI1SK': data['date']
+        'GSI1PK': "POSTS",
+        'GSI1SK': data['date'],
+        'is_deleted': False
     }
-    
     table.put_item(Item=item)
     return data['id']
 
 def update_post(post_id: str, update_data: Dict[str, Any]) -> None:
-    """Execute dynamic update expression for specific fields."""
+    """Update using the correct PK/SK composite key."""
     expr = "SET "
     values = {}
-    for key, value in update_data.items():
-        if key == 'id': continue
+    
+    # No actualizamos las llaves primarias ni el ID
+    safe_data = {k: v for k, v in update_data.items() if k not in ['PK', 'SK', 'id']}
+    
+    for key, value in safe_data.items():
         expr += f"{key} = :{key}, "
         values[f":{key}"] = value
     
     table.update_item(
-        Key={'id': post_id},
+        Key={
+            'PK': f"POST#{post_id}",
+            'SK': "METADATA"
+        },
         UpdateExpression=expr.rstrip(", "),
         ExpressionAttributeValues=values
     )
 
 def delete_post_soft(post_id: str) -> None:
-    """Mark the post as deleted without removing the record."""
+    """Soft delete using PK/SK."""
     table.update_item(
-        Key={'id': post_id},
+        Key={
+            'PK': f"POST#{post_id}",
+            'SK': "METADATA"
+        },
         UpdateExpression="SET is_deleted = :d, deleted_at = :t",
         ExpressionAttributeValues={
             ":d": True,
