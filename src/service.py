@@ -10,15 +10,20 @@ TABLE_NAME = os.environ.get('TABLE_NAME', 'blog-website-table')
 table = dynamodb.Table(TABLE_NAME)
 
 def list_posts() -> List[Dict[str, Any]]:
-    """Retrieve only items of type POST using the TypeIndex."""
     response = table.query(
-        IndexName='TypeIndex',  # <-- Coincide con tu dynamo.tf
+        IndexName='TypeIndex',
         KeyConditionExpression=Key('GSI1PK').eq('POSTS'),
-        # Filtro opcional para soft-delete
         FilterExpression=Attr("is_deleted").ne(True),
-        ScanIndexForward=False # Recientes primero (usa GSI1SK/fecha)
+        ScanIndexForward=False
     )
-    return response.get('Items', [])
+    items = response.get('Items', [])
+    
+    # Paracaídas: Aseguramos que authorId siempre exista al menos como string vacío
+    for item in items:
+        if 'authorId' not in item:
+            item['authorId'] = "unknown"
+            
+    return items
 
 def get_post(post_id: str) -> Union[Dict[str, Any], None]:
     """Retrieve using the Single Table PK/SK pattern."""
@@ -45,6 +50,7 @@ def get_post_by_slug(slug: str) -> Union[Dict[str, Any], None]:
     return items[0] if items else None
 
 def create_post(data: dict):
+    author_id = data.get('authorId')
     # Aseguramos que el item tenga todas las llaves de tus índices
     item = {
         'PK': f"POST#{data['id']}",
@@ -55,6 +61,7 @@ def create_post(data: dict):
         'excerpt': data.get('excerpt', ''),
         'content': data['content'],
         'author': data['author'],
+        'authorId': author_id,
         'date': data['date'],
         'tags': data['tags'],
         'imageUrl': data.get('imageUrl', '/board.png'),
