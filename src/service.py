@@ -1,11 +1,10 @@
 import os
 import boto3
 import datetime
-import uuid
+from ulid import ULID 
 from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, List, Any, Union
  
-# Inicialización
 dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = os.environ.get('TABLE_NAME', 'blog-website-table')
 table = dynamodb.Table(TABLE_NAME)
@@ -19,10 +18,12 @@ def list_posts() -> List[Dict[str, Any]]:
     )
     items = response.get('Items', [])
     
-    # Paracaídas: Aseguramos que authorId siempre exista al menos como string vacío
+    # safeguard
     for item in items:
         if 'authorId' not in item:
             item['authorId'] = "unknown"
+        if 'id' not in item:
+            item['id'] = item['PK'].replace('POST#', '')
             
     return items
 
@@ -51,19 +52,16 @@ def get_post_by_slug(slug: str) -> Union[Dict[str, Any], None]:
     return items[0] if items else None
 
 def create_post(data: dict):
-    # 1. Generamos el ULID aquí en la Lambda
-    # Usamos el que viene del body si existe (para curl), si no, uno nuevo.
-    raw_id = data.get('id') or str(uuid.uuid4())
+ 
+    raw_id = data.get('id') or str(ULID())
     
-    # 2. Construimos las llaves según tu patrón de Single Table
-    # Si get_post usa "POST#{post_id}", aquí debemos guardar igual
     pk = f"POST#{raw_id}"
     sk = "METADATA"
     
     item = {
         'PK': pk,
         'SK': sk,
-        'id': raw_id, # Guardamos el ID limpio para el Frontend
+        'id': raw_id,
         'title': data['title'],
         'slug': data['slug'],
         'excerpt': data.get('excerpt', ''),
@@ -73,26 +71,33 @@ def create_post(data: dict):
         'date': data['date'],
         'tags': data.get('tags', []),
         'imageUrl': data.get('imageUrl', '/board.png'),
-        # Índices para listar (TypeIndex / GSI1)
         'GSI1PK': "POSTS",
         'GSI1SK': data['date'],
         'is_deleted': False
     }
     
     table.put_item(Item=item)
-    return raw_id # Retornamos el ID generado
+    return raw_id
 
 def update_post(post_id: str, update_data: Dict[str, Any]) -> None:
-    """Update using the correct PK/SK composite key."""
+    """
+    IMPORTANTE: El post_id que recibe debe ser el 'raw_id' (ej: 01H... )
+    porque aquí le ponemos el prefijo POST#
+    """
     expr = "SET "
     values = {}
     
-    # No actualizamos las llaves primarias ni el ID
-    safe_data = {k: v for k, v in update_data.items() if k not in ['PK', 'SK', 'id']}
+    safe_data = {k: v for k, v in update_data.items() if k not in ['PK', 'SK', 'id', 'GSI1PK']}
     
+    if 'date' in safe_data:
+        safe_data['GSI1SK'] = safe_data['date']
+
     for key, value in safe_data.items():
-        expr += f"{key} = :{key}, "
+        expr += f"#{key} = :{key}, "
         values[f":{key}"] = value
+    
+
+    names = {f"#{k}": k for k in safe_data.keys()}
     
     table.update_item(
         Key={
@@ -100,7 +105,8 @@ def update_post(post_id: str, update_data: Dict[str, Any]) -> None:
             'SK': "METADATA"
         },
         UpdateExpression=expr.rstrip(", "),
-        ExpressionAttributeValues=values
+        ExpressionAttributeValues=values,
+        ExpressionAttributeNames=names
     )
 
 def delete_post_soft(post_id: str) -> None:
