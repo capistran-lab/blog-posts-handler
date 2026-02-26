@@ -17,34 +17,21 @@ jobs:
               with:
                   fetch-depth: 0
 
-            - name: Get ULID Layer ARN from SSM
-              id: ssm_layer
-              run: |
-                LAYER_ARN=$(aws ssm get-parameter \
-                  --name "/blog/layers/ulid_arn" \
-                  --query "Parameter.Value" \
-                  --output text \
-                  --region ${{ vars.AWS_REGION }})
-                echo "layer_arn=$LAYER_ARN" >> $GITHUB_OUTPUT
-              env:
-                  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-                  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
             - name: Setup Python 3.12
               run: python3 --version
 
-            # --- ALWAYS AUDIT ---
+            # --- SIEMPRE AUDITAR (PR y Main) ---
             - name: Security Audit (pip-audit)
               run: |
                   python3 -m pip install pip-audit
                   python3 -m pip_audit -r requirements.txt --local
 
-            # --- ONLY DEPLOY ON MERGE TO MAIN ---
+            # --- DESPLIEGUE SOLO EN MERGE A MAIN ---
             - name: Install dependencies
               if: github.event_name == 'push'
               run: |
                   rm -rf dist && mkdir dist
-                  # NOTA: Asegúrate que ulid-py NO esté en requirements.txt para no duplicar
+                  # Instalamos solo lo que esté en requirements.txt (sin ulid-py)
                   python3 -m pip install -r requirements.txt -t dist/
                   cp -r src/* dist/
 
@@ -78,7 +65,7 @@ jobs:
                   echo "Waiting for function to be in Active state..."
                   aws lambda wait function-active-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-handler --region ${{ vars.AWS_REGION }}
 
-                  # 1. ACTUALIZAR CÓDIGO
+                  # 1. ACTUALIZAR EL CÓDIGO (.zip)
                   aws lambda update-function-code \
                     --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --s3-bucket ${{ vars.PROJECT_NAME }}-artifacts \
@@ -88,23 +75,15 @@ jobs:
 
                   aws lambda wait function-updated-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-handler --region ${{ vars.AWS_REGION }}
 
-                  # 2. ACTUALIZAR CONFIGURACIÓN (VINCULAR LA LAYER DE ULID)
-                  # Este es el paso clave que faltaba
-                  aws lambda update-function-configuration \
-                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
-                    --layers "${{ steps.ssm_layer.outputs.layer_arn }}" \
-                    --region ${{ vars.AWS_REGION }}
-
-                  aws lambda wait function-updated-v2 --function-name ${{ vars.PROJECT_NAME }}-posts-handler --region ${{ vars.AWS_REGION }}
-
-                  # Metadata extraction para Version Description
+                  # Extracción de metadatos para la descripción de la versión
                   PR_NUMBER=$(git log -1 --pretty=%s | grep -oP '#\d+' | head -n 1 | sed 's/#//' || echo "manual")
                   PR_TITLE=$(git log -1 --pretty=%B | sed -n '3p' | sed 's/["'\'']//g' | xargs)
                   if [ -z "$PR_TITLE" ]; then
                     PR_TITLE=$(git log -1 --pretty=%s | sed -E 's/Merge pull request #[0-9]+ from [^ ]+//' | sed 's/["'\'']//g' | xargs)
                   fi
 
-                  # 3. PUBLICAR VERSIÓN (Ahora con la Layer ya vinculada)
+                  # 2. PUBLICAR VERSIÓN
+                  # Al no haber Layers, este paso es inmediato y seguro.
                   NEW_VER=$(aws lambda publish-version \
                     --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --description "$PR_TITLE" \
@@ -122,9 +101,9 @@ jobs:
             - name: Update or Create Aliases
               if: github.event_name == 'push'
               run: |
+                  # Alias específico del PR
                   PR_ALIAS="pr-${{ steps.deploy_lambda.outputs.pr_number }}"
                   
-                  # Actualizar alias de PR
                   aws lambda update-alias \
                     --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --name "$PR_ALIAS" \
@@ -133,21 +112,4 @@ jobs:
                   aws lambda create-alias \
                     --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --name "$PR_ALIAS" \
-                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
-                    --region ${{ vars.AWS_REGION }}
-
-                  # Actualizar alias live
-                  aws lambda update-alias \
-                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
-                    --name live \
-                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
-                    --region ${{ vars.AWS_REGION }} || \
-                  aws lambda create-alias \
-                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
-                    --name live \
-                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
-                    --region ${{ vars.AWS_REGION }}
-              env:
-                  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-                  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-                  AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
+                    --function

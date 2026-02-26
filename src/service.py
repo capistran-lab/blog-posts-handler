@@ -1,7 +1,7 @@
 import os
 import boto3
 import datetime
-from ulid import ULID 
+
 from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, List, Any, Union
  
@@ -53,7 +53,7 @@ def get_post_by_slug(slug: str) -> Union[Dict[str, Any], None]:
 
 def create_post(data: dict):
  
-    raw_id = data.get('id') or str(ULID())
+    raw_id = data.get('id')
     
     pk = f"POST#{raw_id}"
     sk = "METADATA"
