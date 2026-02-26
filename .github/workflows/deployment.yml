@@ -103,7 +103,8 @@ jobs:
               run: |
                   # Alias específico del PR
                   PR_ALIAS="pr-${{ steps.deploy_lambda.outputs.pr_number }}"
-                  
+                  echo "Updating/Creating PR alias: $PR_ALIAS"
+
                   aws lambda update-alias \
                     --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --name "$PR_ALIAS" \
@@ -112,4 +113,22 @@ jobs:
                   aws lambda create-alias \
                     --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
                     --name "$PR_ALIAS" \
-                    --function
+                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
+                    --region ${{ vars.AWS_REGION }}
+
+                  # Alias 'live' para producción
+                  echo "Updating 'live' alias to version ${{ steps.deploy_lambda.outputs.new_version }}"
+                  aws lambda update-alias \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
+                    --name live \
+                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
+                    --region ${{ vars.AWS_REGION }} || \
+                  aws lambda create-alias \
+                    --function-name ${{ vars.PROJECT_NAME }}-posts-handler \
+                    --name live \
+                    --function-version ${{ steps.deploy_lambda.outputs.new_version }} \
+                    --region ${{ vars.AWS_REGION }}
+              env:
+                  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+                  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+                  AWS_DEFAULT_REGION: ${{ vars.AWS_REGION }}
