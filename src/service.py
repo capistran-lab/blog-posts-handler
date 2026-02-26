@@ -1,10 +1,10 @@
 import os
 import boto3
 import datetime
+import uuid
 from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, List, Any, Union
-from ulid import ULID # Necesitas instalar 'ulid-py'
-
+ 
 # Inicialización
 dynamodb = boto3.resource('dynamodb')
 TABLE_NAME = os.environ.get('TABLE_NAME', 'blog-website-table')
@@ -53,7 +53,7 @@ def get_post_by_slug(slug: str) -> Union[Dict[str, Any], None]:
 def create_post(data: dict):
     # 1. Generamos el ULID aquí en la Lambda
     # Usamos el que viene del body si existe (para curl), si no, uno nuevo.
-    raw_id = data.get('id') or str(ULID())
+    raw_id = data.get('id') or str(uuid.uuid4())
     
     # 2. Construimos las llaves según tu patrón de Single Table
     # Si get_post usa "POST#{post_id}", aquí debemos guardar igual
