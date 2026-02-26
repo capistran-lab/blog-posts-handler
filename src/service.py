@@ -3,6 +3,7 @@ import boto3
 import datetime
 from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, List, Any, Union
+from ulid import ULID # Necesitas instalar 'ulid-py'
 
 # Inicialización
 dynamodb = boto3.resource('dynamodb')
@@ -50,27 +51,36 @@ def get_post_by_slug(slug: str) -> Union[Dict[str, Any], None]:
     return items[0] if items else None
 
 def create_post(data: dict):
-    author_id = data.get('authorId')
-    # Aseguramos que el item tenga todas las llaves de tus índices
+    # 1. Generamos el ULID aquí en la Lambda
+    # Usamos el que viene del body si existe (para curl), si no, uno nuevo.
+    raw_id = data.get('id') or str(ULID())
+    
+    # 2. Construimos las llaves según tu patrón de Single Table
+    # Si get_post usa "POST#{post_id}", aquí debemos guardar igual
+    pk = f"POST#{raw_id}"
+    sk = "METADATA"
+    
     item = {
-        'PK': f"POST#{data['id']}",
-        'SK': "METADATA",
-        'id': data['id'],
+        'PK': pk,
+        'SK': sk,
+        'id': raw_id, # Guardamos el ID limpio para el Frontend
         'title': data['title'],
         'slug': data['slug'],
         'excerpt': data.get('excerpt', ''),
         'content': data['content'],
         'author': data['author'],
-        'authorId': author_id,
+        'authorId': data.get('authorId', 'unknown'),
         'date': data['date'],
-        'tags': data['tags'],
+        'tags': data.get('tags', []),
         'imageUrl': data.get('imageUrl', '/board.png'),
+        # Índices para listar (TypeIndex / GSI1)
         'GSI1PK': "POSTS",
         'GSI1SK': data['date'],
         'is_deleted': False
     }
+    
     table.put_item(Item=item)
-    return data['id']
+    return raw_id # Retornamos el ID generado
 
 def update_post(post_id: str, update_data: Dict[str, Any]) -> None:
     """Update using the correct PK/SK composite key."""
